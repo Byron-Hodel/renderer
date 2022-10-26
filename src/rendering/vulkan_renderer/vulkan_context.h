@@ -11,7 +11,7 @@ typedef struct {
 typedef struct {
 	vulkan_physical_device physical_device;
 	VkDevice logical_device;
-	uint32_t queue_indices[4];
+	int32_t queue_indices[4];
 	VkQueue queues[4];
 } vulkan_device_t;
 
@@ -19,7 +19,6 @@ typedef struct {
 	VkInstance instance;
 	uint32_t physical_device_count;
 	vulkan_physical_device* physical_devices;
-	int32_t queue_indices[4];
 	vulkan_device_t selected_device;
 } vulkan_context_t;
 
