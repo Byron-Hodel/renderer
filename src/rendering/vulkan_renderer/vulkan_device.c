@@ -98,13 +98,15 @@ int8_t _vulkan_init_selected_device(vulkan_context_t* context) {
 	for(int i = 1; i < 4; i++) {
 		int8_t unique_index = 1;
 		for(int j = 0; j < i; j++) {
-			if(context->selected_device.queue_indices[i] == context->selected_device.queue_indices[j]) {
+			if(context->selected_device.queue_indices[i] == context->selected_device.queue_indices[j] ||
+			   context->selected_device.queue_indices[i] == -1) 
+			{
 				unique_index = 0;
 				break;
 			}
 		}
 		if(unique_index) {
-			queue_info_indices[queue_info_count++] = context->selected_device.queue_indices[i];
+			queue_info_indices[queue_info_count++] = context->selected_device.queue_indices[unique_index];
 		}
 		
 	}
