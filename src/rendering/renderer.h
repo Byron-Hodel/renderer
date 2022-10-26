@@ -22,7 +22,9 @@ void renderer_destroy_context(renderer_context_t* context);
 
 render_target_t* renderer_create_render_target(renderer_context_t* context, platform_window_t* platform_window);
 void renderer_destroy_render_target(renderer_context_t* context, render_target_t* target);
+int8_t renderer_recreate_render_target(renderer_context_t* context, render_target_t* target);
 
-
+// TODO: REMOVE LATER
+void draw_triangle(renderer_context_t* context, render_target_t* target);
 
 #endif // RENDERER_H

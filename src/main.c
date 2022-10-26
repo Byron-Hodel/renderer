@@ -28,11 +28,24 @@ int main(void) {
 	window_create_info.flags = PLATFORM_WF_SPLASH;
 	platform_window_t* window = platform_create_window(platform_context, window_create_info, NULL);
 
+	render_target_t* window_render_target = renderer_create_render_target(renderer_context, window);
+	if(window_render_target == NULL) {
+		platform_destroy_window(platform_context, window, NULL);
+		renderer_destroy_context(renderer_context);
+		platform_destroy_context(platform_context, NULL);
+		return -1;
+	}
+
+	draw_triangle(renderer_context, window_render_target);
+
+
 
 	while(!platform_window_should_close(platform_context, window)) {
 		platform_handle_events(platform_context);
 		platform_sleep_miliseconds(32);
 	}
+
+	draw_triangle(renderer_context, window_render_target);
 
 	platform_destroy_window(platform_context, window, NULL);
 	renderer_destroy_context(renderer_context);

@@ -11,6 +11,7 @@ add_executable(vulkan_renderer
 	rendering/vulkan_renderer/vulkan_renderer.c
 	rendering/vulkan_renderer/vulkan_internal.h
 	rendering/vulkan_renderer/vulkan_device.c
+	rendering/vulkan_renderer/vulkan_swapchain.c
 	
 	rendering/directx_renderer/directx_context.h
 )
