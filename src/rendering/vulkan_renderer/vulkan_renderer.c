@@ -26,6 +26,7 @@ static const char* device_extension_names[] = {
 
 static vulkan_context_t context;
 
+
 int8_t vulkan_renderer_init(const char* app_name) {
 	context.layer_count = layer_count;
 	context.layer_names = (char**)layer_names;
@@ -54,6 +55,7 @@ int8_t vulkan_renderer_init(const char* app_name) {
 		return 0;
 	}
 
+
 	uint32_t selected_device_index = vulkan_select_physical_device(context.physical_devices);
 	if(selected_device_index == -1) {
 		vulkan_cleanup_physical_devices(&context.physical_devices);
@@ -72,7 +74,7 @@ int8_t vulkan_renderer_init(const char* app_name) {
 	renderpass_pos.y = 0;
 	renderpass_extents.x = 0;
 	renderpass_extents.y = 0;
-	if(!vulkan_create_renderpass(context, &context.default_renderpass, renderpass_pos, renderpass_extents, 0, 0)) {
+	if(!vulkan_create_renderpass(&context, &context.default_renderpass, renderpass_pos, renderpass_extents, 0, 0)) {
 		vulkan_cleanup_physical_devices(&context.physical_devices);
 		vkDestroyInstance(context.instance, NULL);
 		return 0;
@@ -81,74 +83,99 @@ int8_t vulkan_renderer_init(const char* app_name) {
 	return 1;
 }
 
+
 void vulkan_renderer_shutdown(void) {
-	vulkan_destroy_renderpass(context, &context.default_renderpass);
+	vulkan_destroy_renderpass(&context, &context.default_renderpass);
 	vulkan_cleanup_physical_devices(&context.physical_devices);
 	vulkan_cleanup_device(&context.selected_device);
 	vkDestroyInstance(context.instance, NULL);
 }
 
+
 graphics_pipeline_t* vulkan_renderer_create_graphics_pipeline(const graphics_pipeline_create_info_t create_info) {
 	vulkan_graphics_pipeline_t* pipeline = malloc(sizeof(vulkan_graphics_pipeline_t));
-	if(!vulkan_create_graphics_pipeline(context, pipeline, create_info)) return NULL;
+	if(!vulkan_create_graphics_pipeline(&context, pipeline, create_info)) return NULL;
 	return (graphics_pipeline_t*)pipeline;
 }
 
+
 void vulkan_renderer_destroy_graphics_pipeline(graphics_pipeline_t* pipeline) {
-	vulkan_destroy_graphics_pipeline(context, (vulkan_graphics_pipeline_t*)pipeline);
+	vulkan_destroy_graphics_pipeline(&context, (vulkan_graphics_pipeline_t*)pipeline);
 }
 
 
 int8_t vulkan_renderer_swapchain_init(swapchain_t* swapchain, platform_window_t* window) {
 	vulkan_swapchain_t* sc = malloc(sizeof(vulkan_swapchain_t));
-	if(!vulkan_swapchain_create(context, window, sc)) {
+	if(!vulkan_swapchain_create(&context, window, sc)) {
 		return 0;
 	}
 	swapchain->handle = (void*)sc;
 	return 1;
 }
+
+
 void vulkan_renderer_swapchain_cleanup(swapchain_t* swapchain) {
 	vulkan_swapchain_t* sc = (vulkan_swapchain_t*)swapchain->handle;
-	vulkan_swapchain_destroy(context, sc);
+	vulkan_swapchain_destroy(&context, sc);
 	swapchain->handle = NULL;
 }
+
+
 void vulkan_renderer_swapchain_next_framebuffer(swapchain_t swapchain, framebuffer_t* buffer) {
 	vulkan_swapchain_t* sc = (vulkan_swapchain_t*)swapchain.handle;
+	VkSemaphore semaphore;
+	uint32_t image_index;
+	VkSemaphoreCreateInfo semaphore_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+	VkResult result = vkCreateSemaphore(context.selected_device.handle, &semaphore_info, NULL, &semaphore);
+	vkAcquireNextImageKHR(context.selected_device.handle, sc->handle,
+	                      UINT64_MAX, semaphore, VK_NULL_HANDLE, &image_index);
+	//buffer->handle = 
+	buffer->extra = swapchain.handle;
 }
 
+// TODO: only here to make things work, remove later
+static vulkan_command_buffer_t tmp_cmd_buffer = {0};
 
 int8_t vulkan_renderer_begin_draw(framebuffer_t target_buffer) {
-	vulkan_command_buffer_t* cmd_buffer;
-	vulkan_framebuffer_t* framebuffer;
+	if(tmp_cmd_buffer.handle == VK_NULL_HANDLE) {
+		if(!vulkan_command_buffer_alloc(context, &tmp_cmd_buffer,
+		                                context.selected_device.graphics_cmd_pool, 1))
+		{
+			return 0;
+		}
+	}
+	vulkan_command_buffer_t* cmd_buffer = &tmp_cmd_buffer;
+	vulkan_framebuffer_t* framebuffer = (vulkan_framebuffer_t*)target_buffer.handle;
 	vulkan_command_buffer_reset(cmd_buffer);
 	vulkan_command_buffer_begin_recording(cmd_buffer, 0, 0, 0);
 	vulkan_renderpass_begin(&context.default_renderpass, cmd_buffer, framebuffer);
-
 	return 1;
 }
 
+
 void draw_triangle(framebuffer_t target_buffer, graphics_pipeline_t* pipeline) {
 	vulkan_graphics_pipeline_t* vulkan_pipeline = (vulkan_graphics_pipeline_t*)pipeline;
-	vulkan_command_buffer_t* cmd_buffer;
+	vulkan_command_buffer_t* cmd_buffer = &tmp_cmd_buffer;
+	vulkan_framebuffer_t* framebuffer = (vulkan_framebuffer_t*)target_buffer.handle;
 	VkViewport viewport;
+	viewport.width = framebuffer->width;
+	viewport.height = framebuffer->height;
 	VkRect2D scissor;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
-
 	scissor.offset.x = 0;
 	scissor.offset.y = 0;
 
 	vkCmdBindPipeline(cmd_buffer->handle, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_pipeline->handle);
-
 	vkCmdSetViewport(cmd_buffer->handle, 0, 1, &viewport);
 	vkCmdSetScissor(cmd_buffer->handle, 0, 1, &scissor);
-
 	vkCmdDraw(cmd_buffer->handle, 3, 1, 0, 0);
 }
 
+
 int8_t vulkan_renderer_end_draw(framebuffer_t target_buffer) {
-	vulkan_command_buffer_t* cmd_buffer;
-	vulkan_framebuffer_t* framebuffer;
+	vulkan_command_buffer_t* cmd_buffer = &tmp_cmd_buffer;
+	vulkan_framebuffer_t* framebuffer = (vulkan_framebuffer_t*)target_buffer.handle;
 	VkSemaphore image_avaliable_semaphore;
 	VkSemaphore render_complete_semaphore;
 	vulkan_fence_t* fence;

@@ -1,6 +1,6 @@
 #include "vulkan_image.h"
 
-int8_t vulkan_image_create(const vulkan_context_t context, vulkan_image_t* image, VkImageType type,
+int8_t vulkan_image_create(const vulkan_context_t* context, vulkan_image_t* image, VkImageType type,
                            uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling,
                            VkImageUsageFlags usage, VkMemoryPropertyFlags mem_flags, VkImageAspectFlags aspect_flags)
 {
@@ -18,14 +18,14 @@ int8_t vulkan_image_create(const vulkan_context_t context, vulkan_image_t* image
 	image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-	VkResult r = vkCreateImage(context.selected_device.handle, &image_info, NULL, &image->handle);
+	VkResult r = vkCreateImage(context->selected_device.handle, &image_info, NULL, &image->handle);
 	if(r != VK_SUCCESS) return 0;
 
 	VkMemoryRequirements mem_requirements;
-	vkGetImageMemoryRequirements(context.selected_device.handle, image->handle, &mem_requirements);
+	vkGetImageMemoryRequirements(context->selected_device.handle, image->handle, &mem_requirements);
 
 
-	VkPhysicalDevice physical_device = context.physical_devices.handles[context.selected_device.device_index];
+	VkPhysicalDevice physical_device = context->physical_devices.handles[context->selected_device.device_index];
 	uint32_t mem_type_index = 0;
 	VkPhysicalDeviceMemoryProperties memory_properties;
 	vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
@@ -39,8 +39,8 @@ int8_t vulkan_image_create(const vulkan_context_t context, vulkan_image_t* image
 	VkMemoryAllocateInfo alloc_info = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
 	alloc_info.allocationSize = mem_requirements.size;
 	alloc_info.memoryTypeIndex = mem_type_index;
-	vkAllocateMemory(context.selected_device.handle, &alloc_info, NULL, &image->device_memory_handle);
-	vkBindImageMemory(context.selected_device.handle, image->handle, image->device_memory_handle, 0);
+	vkAllocateMemory(context->selected_device.handle, &alloc_info, NULL, &image->device_memory_handle);
+	vkBindImageMemory(context->selected_device.handle, image->handle, image->device_memory_handle, 0);
 
 
 	VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -57,15 +57,15 @@ int8_t vulkan_image_create(const vulkan_context_t context, vulkan_image_t* image
 	view_info.subresourceRange.layerCount = 1;
 	view_info.subresourceRange.aspectMask = aspect_flags;
 
-	vkCreateImageView(context.selected_device.handle, &view_info, NULL, &image->view);
+	vkCreateImageView(context->selected_device.handle, &view_info, NULL, &image->view);
 
 	return 1;
 }
 
-void vulkan_image_destroy(const vulkan_context_t context, vulkan_image_t* image) {
-	vkDestroyImage(context.selected_device.handle, image->handle, NULL);
-	vkDestroyImageView(context.selected_device.handle, image->view, NULL);
-	vkFreeMemory(context.selected_device.handle, image->device_memory_handle, NULL);
+void vulkan_image_destroy(const vulkan_context_t* context, vulkan_image_t* image) {
+	vkDestroyImage(context->selected_device.handle, image->handle, NULL);
+	vkDestroyImageView(context->selected_device.handle, image->view, NULL);
+	vkFreeMemory(context->selected_device.handle, image->device_memory_handle, NULL);
 	image->handle = VK_NULL_HANDLE;
 	image->view = VK_NULL_HANDLE;
 	image->device_memory_handle = VK_NULL_HANDLE;

@@ -4,15 +4,15 @@
 #include "vulkan_framebuffer.h"
 #include <malloc.h>
 
-int8_t vulkan_swapchain_create(const vulkan_context_t context, platform_window_t* window, vulkan_swapchain_t* swapchain) {
+int8_t vulkan_swapchain_create(vulkan_context_t* context, platform_window_t* window, vulkan_swapchain_t* swapchain) {
 	vulkan_swapchain_t sc;
-	sc.surface = platform_vulkan_create_surface(window, context.instance);
+	sc.surface = platform_vulkan_create_surface(window, context->instance);
 	if(sc.surface == VK_NULL_HANDLE) {
 		return 0;
 	}
 	VkResult           result;
-	VkPhysicalDevice   physical_device    = context.physical_devices.handles[context.selected_device.device_index];
-	VkDevice           logical_device     = context.selected_device.handle;
+	VkPhysicalDevice   physical_device    = context->physical_devices.handles[context->selected_device.device_index];
+	VkDevice           logical_device     = context->selected_device.handle;
 	uint32_t           present_mode_count = 0;
 	uint32_t           format_count       = 0;
 	VkPresentModeKHR   present_modes[64];
@@ -23,7 +23,7 @@ int8_t vulkan_swapchain_create(const vulkan_context_t context, platform_window_t
 	vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, sc.surface, &format_count, formats);
 	result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, sc.surface, &sc.surface_capabilities);
 	if(result != VK_SUCCESS) {
-		vkDestroySurfaceKHR(context.instance, sc.surface, NULL);
+		vkDestroySurfaceKHR(context->instance, sc.surface, NULL);
 		return 0;
 	}
 
@@ -68,13 +68,15 @@ int8_t vulkan_swapchain_create(const vulkan_context_t context, platform_window_t
 	swapchain_info.clipped          = VK_TRUE;
 	result = vkCreateSwapchainKHR(logical_device, &swapchain_info, NULL, &sc.handle);
 	if(result != VK_SUCCESS) {
-		vkDestroySurfaceKHR(context.instance, sc.surface, NULL);
+		vkDestroySurfaceKHR(context->instance, sc.surface, NULL);
 		return 0;
 	}
 	vkGetSwapchainImagesKHR(logical_device, sc.handle, &sc.image_count, NULL);
 	sc.images       = calloc(sc.image_count, sizeof(VkImage));
 	sc.image_views  = calloc(sc.image_count, sizeof(VkImageView));
 	sc.depth_images = calloc(sc.image_count, sizeof(vulkan_image_t));
+	sc.image_avaliable_semaphores = calloc(sc.image_count, sizeof(VkSemaphore));
+	sc.default_renderpass_frame_buffers = calloc(sc.image_count, sizeof(vulkan_framebuffer_t));
 	vkGetSwapchainImagesKHR(logical_device, sc.handle, &sc.image_count, sc.images);
 
 	VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -96,7 +98,9 @@ int8_t vulkan_swapchain_create(const vulkan_context_t context, platform_window_t
 			free(sc.images);
 			free(sc.image_views);
 			free(sc.image_views);
-			vkDestroySurfaceKHR(context.instance, sc.surface, NULL);
+			free(sc.image_avaliable_semaphores);
+			free(sc.default_renderpass_frame_buffers);
+			vkDestroySurfaceKHR(context->instance, sc.surface, NULL);
 			vkDestroySwapchainKHR(logical_device, sc.handle, NULL);
 			return 0;
 		}
@@ -106,16 +110,31 @@ int8_t vulkan_swapchain_create(const vulkan_context_t context, platform_window_t
 		                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_DEPTH_BIT))
 		{
 			vkDestroySwapchainKHR(logical_device, sc.handle, NULL);
-			vkDestroySurfaceKHR(context.instance, sc.surface, NULL);
+			vkDestroySurfaceKHR(context->instance, sc.surface, NULL);
 			vkDestroyImageView(logical_device, sc.image_views[i], NULL);
+			free(sc.images);
+			free(sc.image_views);
+			free(sc.image_views);
+			free(sc.image_avaliable_semaphores);
+			free(sc.default_renderpass_frame_buffers);
 			return 0;
 		}
-		VkSemaphoreCreateInfo semaphore_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-		result = vkCreateSemaphore(logical_device, &semaphore_info, NULL, sc.image_avaliable_semaphores+i);
-		if(result != VK_SUCCESS) {
+		VkImageView attachments[2];
+		attachments[0] = sc.image_views[i];
+		attachments[1] = sc.depth_images->view;
+		if(!vulkan_framebuffer_create(context, sc.default_renderpass_frame_buffers+i,
+		                              &context->default_renderpass, sc.extent.width,
+		                              sc.extent.height, 2, attachments))
+		{
 			vkDestroySwapchainKHR(logical_device, sc.handle, NULL);
-			vkDestroySurfaceKHR(context.instance, sc.surface, NULL);
+			vkDestroySurfaceKHR(context->instance, sc.surface, NULL);
 			vkDestroyImageView(logical_device, sc.image_views[i], NULL);
+			vulkan_image_destroy(context, sc.depth_images+i);
+			free(sc.images);
+			free(sc.image_views);
+			free(sc.image_views);
+			free(sc.image_avaliable_semaphores);
+			free(sc.default_renderpass_frame_buffers);
 			return 0;
 		}
 	}
@@ -126,25 +145,27 @@ int8_t vulkan_swapchain_create(const vulkan_context_t context, platform_window_t
 }
 
 
-void vulkan_swapchain_destroy(const vulkan_context_t context, vulkan_swapchain_t* swapchain) {
-	vkDestroySwapchainKHR(context.selected_device.handle, swapchain->handle, NULL);
-	vkDestroySurfaceKHR(context.instance, swapchain->surface, NULL);
+void vulkan_swapchain_destroy(const vulkan_context_t* context, vulkan_swapchain_t* swapchain) {
+	vkDestroySwapchainKHR(context->selected_device.handle, swapchain->handle, NULL);
+	vkDestroySurfaceKHR(context->instance, swapchain->surface, NULL);
 	for(uint32_t i = 0; i < swapchain->image_count; i++) {
-		vkDestroyImageView(context.selected_device.handle, swapchain->image_views[i], NULL);
+		vkDestroyImageView(context->selected_device.handle, swapchain->image_views[i], NULL);
 		vulkan_image_destroy(context, swapchain->depth_images+i);
-		vkDestroySemaphore(context.selected_device.handle, swapchain->image_avaliable_semaphores[i], NULL);
+		vulkan_framebuffer_destroy(context, swapchain->default_renderpass_frame_buffers+i);
 	}
 	free(swapchain->image_views);
 	free(swapchain->images);
 	free(swapchain->depth_images);
+	free(swapchain->image_avaliable_semaphores);
+	free(swapchain->default_renderpass_frame_buffers);
 	*swapchain = (vulkan_swapchain_t) {0};
 }
 
 
-int8_t vulkan_swapchain_recreate(const vulkan_context_t context, vulkan_swapchain_t* swapchain) {
+int8_t vulkan_swapchain_recreate(vulkan_context_t* context, vulkan_swapchain_t* swapchain) {
 	vulkan_swapchain_t sc                 = *swapchain;
-	VkPhysicalDevice   physical_device    = context.physical_devices.handles[context.selected_device.device_index];
-	VkDevice           logical_device     = context.selected_device.handle;
+	VkPhysicalDevice   physical_device    = context->physical_devices.handles[context->selected_device.device_index];
+	VkDevice           logical_device     = context->selected_device.handle;
 	VkResult result;
 
 	platform_get_window_size(sc.window, &sc.extent.width, &sc.extent.height);
@@ -178,6 +199,7 @@ int8_t vulkan_swapchain_recreate(const vulkan_context_t context, vulkan_swapchai
 	sc.images       = calloc(sc.image_count, sizeof(VkImage));
 	sc.image_views  = calloc(sc.image_count, sizeof(VkImageView));
 	sc.depth_images = calloc(sc.image_count, sizeof(vulkan_image_t));
+	sc.default_renderpass_frame_buffers = calloc(sc.image_count, sizeof(vulkan_framebuffer_t));
 	vkGetSwapchainImagesKHR(logical_device, sc.handle, &sc.image_count, sc.images);
 
 	VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -211,19 +233,40 @@ int8_t vulkan_swapchain_recreate(const vulkan_context_t context, vulkan_swapchai
 			free(sc.image_views);
 			return 0;
 		}
+		VkImageView attachments[2];
+		attachments[0] = sc.image_views[i];
+		attachments[1] = sc.depth_images->view;
+		if(!vulkan_framebuffer_create(context, sc.default_renderpass_frame_buffers+i,
+		                              &context->default_renderpass, sc.extent.width,
+		                              sc.extent.height, 2, attachments))
+		{
+			vkDestroySwapchainKHR(logical_device, sc.handle, NULL);
+			vkDestroyImageView(logical_device, sc.image_views[i], NULL);
+			vulkan_image_destroy(context, sc.depth_images+i);
+			free(sc.images);
+			free(sc.image_views);
+			free(sc.image_views);
+			free(sc.default_renderpass_frame_buffers);
+			return 0;
+		}
 	}
 	vkDestroySwapchainKHR(logical_device, swapchain->handle, NULL);
 	for(uint32_t i = 0; i < swapchain->image_count; i++) {
 		vkDestroyImageView(logical_device, swapchain->image_views[i], NULL);
 		vulkan_image_destroy(context, swapchain->depth_images+i);
+		vulkan_framebuffer_destroy(context, swapchain->default_renderpass_frame_buffers+i);
 	}
+	free(swapchain->images);
+	free(swapchain->image_views);
+	free(swapchain->depth_images);
+	free(swapchain->default_renderpass_frame_buffers);
 	*swapchain = sc;
 	return 1;
 }
 
 
 
-void vulkan_swapchain_present(const vulkan_context_t context, vulkan_swapchain_t* swapchain,
+void vulkan_swapchain_present(vulkan_context_t* context, vulkan_swapchain_t* swapchain,
                               VkSemaphore render_complete_semaphore, uint32_t image_index)
 {
 	VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
@@ -234,7 +277,7 @@ void vulkan_swapchain_present(const vulkan_context_t context, vulkan_swapchain_t
 	present_info.pImageIndices = &image_index;
 	present_info.pResults = NULL;
 
-	VkResult r = vkQueuePresentKHR(context.selected_device.queues[GRAPHICS_QUEUE_INDEX], &present_info);
+	VkResult r = vkQueuePresentKHR(context->selected_device.queues[GRAPHICS_QUEUE_INDEX], &present_info);
 	if(r == VK_ERROR_OUT_OF_DATE_KHR) {
 		vulkan_swapchain_recreate(context, swapchain);
 	}

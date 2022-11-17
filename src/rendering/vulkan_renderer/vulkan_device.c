@@ -93,7 +93,7 @@ int8_t vulkan_init_device(const vulkan_context_t context, vulkan_device_t* devic
 				break;
 			}
 		}
-		if(unique_index) {
+		if(unique_index && device->queue_family_indices[i] != -1) {
 			queue_info_indices[queue_info_count++] = device->queue_family_indices[i];
 		}
 	}

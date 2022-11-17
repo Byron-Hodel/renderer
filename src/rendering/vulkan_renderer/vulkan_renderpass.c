@@ -1,6 +1,6 @@
 #include "vulkan_renderpass.h"
 
-int8_t vulkan_create_renderpass(const vulkan_context_t context, vulkan_renderpass_t* renderpass,
+int8_t vulkan_create_renderpass(const vulkan_context_t* context, vulkan_renderpass_t* renderpass,
                                 vec2_t pos, vec2_t extents, float depth, uint32_t stencil)
 {
 	const uint32_t attachment_count = 2;
@@ -63,7 +63,7 @@ int8_t vulkan_create_renderpass(const vulkan_context_t context, vulkan_renderpas
 	renderpass_info.dependencyCount = 1;
 	renderpass_info.pDependencies = &dependency;
 
-	VkResult r = vkCreateRenderPass(context.selected_device.handle, &renderpass_info, NULL, &renderpass->handle);
+	VkResult r = vkCreateRenderPass(context->selected_device.handle, &renderpass_info, NULL, &renderpass->handle);
 	if(r != VK_SUCCESS) return 0;
 
 	renderpass->pos = pos;
@@ -73,8 +73,8 @@ int8_t vulkan_create_renderpass(const vulkan_context_t context, vulkan_renderpas
 	return 1;
 }
 
-void vulkan_destroy_renderpass(const vulkan_context_t context, vulkan_renderpass_t* renderpass) {
-	vkDestroyRenderPass(context.selected_device.handle, renderpass->handle, NULL);
+void vulkan_destroy_renderpass(const vulkan_context_t* context, vulkan_renderpass_t* renderpass) {
+	vkDestroyRenderPass(context->selected_device.handle, renderpass->handle, NULL);
 	*renderpass = (vulkan_renderpass_t) {0};
 }
 

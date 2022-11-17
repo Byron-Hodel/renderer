@@ -13,12 +13,9 @@ typedef struct swapchain_t {
 
 typedef struct framebuffer_t {
 	void* handle;
+	void* extra;
 } framebuffer_t;
 
-typedef struct render_target_t {
-	uint32_t type;
-	void* handle;
-} render_target_t;
 typedef struct graphics_pipeline_t graphics_pipeline_t;
 
 typedef struct {

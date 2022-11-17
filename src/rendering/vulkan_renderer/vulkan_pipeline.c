@@ -1,6 +1,6 @@
 #include "vulkan_pipeline.h"
 
-int8_t vulkan_create_graphics_pipeline(const vulkan_context_t context, vulkan_graphics_pipeline_t* pipeline,
+int8_t vulkan_create_graphics_pipeline(const vulkan_context_t* context, vulkan_graphics_pipeline_t* pipeline,
                                        graphics_pipeline_create_info_t create_info)
 {
 	VkResult r;
@@ -13,12 +13,12 @@ int8_t vulkan_create_graphics_pipeline(const vulkan_context_t context, vulkan_gr
 	frag_shader_info.pCode = (uint32_t*)create_info.frag_shader_src;
 
 	VkShaderModule vert_shader_module, frag_shader_module;
-	r = vkCreateShaderModule(context.selected_device.handle, &vert_shader_info, NULL, &vert_shader_module);
+	r = vkCreateShaderModule(context->selected_device.handle, &vert_shader_info, NULL, &vert_shader_module);
 	if(r != VK_SUCCESS) return 0;
 
-	r = vkCreateShaderModule(context.selected_device.handle, &frag_shader_info, NULL, &frag_shader_module);
+	r = vkCreateShaderModule(context->selected_device.handle, &frag_shader_info, NULL, &frag_shader_module);
 	if(r != VK_SUCCESS) {
-		vkDestroyShaderModule(context.selected_device.handle, vert_shader_module, NULL);
+		vkDestroyShaderModule(context->selected_device.handle, vert_shader_module, NULL);
 		return 0;
 	}
 
@@ -94,10 +94,10 @@ int8_t vulkan_create_graphics_pipeline(const vulkan_context_t context, vulkan_gr
 	VkPipelineLayout layout;
 	VkPipelineLayoutCreateInfo layout_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
 
-	r = vkCreatePipelineLayout(context.selected_device.handle, &layout_info, NULL, &layout);
+	r = vkCreatePipelineLayout(context->selected_device.handle, &layout_info, NULL, &layout);
 	if(r != VK_SUCCESS) {
-		vkDestroyShaderModule(context.selected_device.handle, vert_shader_module, NULL);
-		vkDestroyShaderModule(context.selected_device.handle, frag_shader_module, NULL);
+		vkDestroyShaderModule(context->selected_device.handle, vert_shader_module, NULL);
+		vkDestroyShaderModule(context->selected_device.handle, frag_shader_module, NULL);
 		return 0;
 	}
 
@@ -114,16 +114,16 @@ int8_t vulkan_create_graphics_pipeline(const vulkan_context_t context, vulkan_gr
 	pipeline_info.pColorBlendState = &color_blend_state;
 	pipeline_info.pDynamicState = &dynamic_state_info;
 	pipeline_info.layout = layout;
-	pipeline_info.renderPass = context.default_renderpass.handle;
+	pipeline_info.renderPass = context->default_renderpass.handle;
 	pipeline_info.subpass = 0;
 	pipeline_info.basePipelineIndex = -1;
 	// TODO: Maybe use basePipelineHandle at some point
 
-	r = vkCreateGraphicsPipelines(context.selected_device.handle, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &pipeline->handle);
+	r = vkCreateGraphicsPipelines(context->selected_device.handle, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &pipeline->handle);
 	if(r != VK_SUCCESS) {
-		vkDestroyShaderModule(context.selected_device.handle, vert_shader_module, NULL);
-		vkDestroyShaderModule(context.selected_device.handle, frag_shader_module, NULL);
-		vkDestroyPipelineLayout(context.selected_device.handle, layout, NULL);
+		vkDestroyShaderModule(context->selected_device.handle, vert_shader_module, NULL);
+		vkDestroyShaderModule(context->selected_device.handle, frag_shader_module, NULL);
+		vkDestroyPipelineLayout(context->selected_device.handle, layout, NULL);
 		return 0;
 	}
 
@@ -134,11 +134,11 @@ int8_t vulkan_create_graphics_pipeline(const vulkan_context_t context, vulkan_gr
 	return 1;
 }
 
-void vulkan_destroy_graphics_pipeline(const vulkan_context_t context, vulkan_graphics_pipeline_t* pipeline) {
-	vkDestroyShaderModule(context.selected_device.handle, pipeline->vert_shader_module, NULL);
-	vkDestroyShaderModule(context.selected_device.handle, pipeline->frag_shader_module, NULL);
-	vkDestroyPipelineLayout(context.selected_device.handle, pipeline->layout, NULL);
-	vkDestroyPipeline(context.selected_device.handle, pipeline->handle, NULL);
+void vulkan_destroy_graphics_pipeline(const vulkan_context_t* context, vulkan_graphics_pipeline_t* pipeline) {
+	vkDestroyShaderModule(context->selected_device.handle, pipeline->vert_shader_module, NULL);
+	vkDestroyShaderModule(context->selected_device.handle, pipeline->frag_shader_module, NULL);
+	vkDestroyPipelineLayout(context->selected_device.handle, pipeline->layout, NULL);
+	vkDestroyPipeline(context->selected_device.handle, pipeline->handle, NULL);
 	pipeline->handle = VK_NULL_HANDLE;
 	pipeline->vert_shader_module = VK_NULL_HANDLE;
 	pipeline->frag_shader_module = VK_NULL_HANDLE;

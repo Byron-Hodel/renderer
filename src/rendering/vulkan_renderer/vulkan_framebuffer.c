@@ -1,7 +1,7 @@
 #include "vulkan_framebuffer.h"
 #include <malloc.h>
 
-int8_t vulkan_framebuffer_create(const vulkan_context_t context, vulkan_framebuffer_t* framebuffer,
+int8_t vulkan_framebuffer_create(const vulkan_context_t* context, vulkan_framebuffer_t* framebuffer,
                                  vulkan_renderpass_t* renderpass, const uint32_t width, const uint32_t height,
                                  uint32_t attachment_count, VkImageView* attachments)
 {
@@ -16,7 +16,7 @@ int8_t vulkan_framebuffer_create(const vulkan_context_t context, vulkan_framebuf
 	framebuffer_info.height = height;
 	framebuffer_info.layers = 1;
 
-	VkResult r = vkCreateFramebuffer(context.selected_device.handle, &framebuffer_info, NULL, &framebuffer->handle);
+	VkResult r = vkCreateFramebuffer(context->selected_device.handle, &framebuffer_info, NULL, &framebuffer->handle);
 	if(r != VK_SUCCESS) {
 		return 0;
 	}
@@ -29,8 +29,8 @@ int8_t vulkan_framebuffer_create(const vulkan_context_t context, vulkan_framebuf
 	return 1;
 }
 
-void vulkan_framebuffer_destroy(const vulkan_context_t context, vulkan_framebuffer_t* framebuffer) {
-	vkDestroyFramebuffer(context.selected_device.handle, framebuffer->handle, NULL);
+void vulkan_framebuffer_destroy(const vulkan_context_t* context, vulkan_framebuffer_t* framebuffer) {
+	vkDestroyFramebuffer(context->selected_device.handle, framebuffer->handle, NULL);
 	free(framebuffer->attachments);
 	framebuffer->width = 0;
 	framebuffer->height = 0;
