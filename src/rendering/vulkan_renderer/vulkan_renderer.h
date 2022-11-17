@@ -1,24 +1,21 @@
 #ifndef VULKAN_RENDERER_H
 #define VULKAN_RENDERER_H
 
-#include "rendering/renderer_internal.h"
-#include "vulkan_context.h"
-#include <vulkan/vulkan.h>
+#include "rendering/renderer.h"
 
-int8_t vulkan_init_context(vulkan_context_t* context, platform_context_t* platform_context, const char* app_name);
-void vulkan_cleanup_context(vulkan_context_t* context);
+int8_t vulkan_renderer_init(const char* app_name);
+void vulkan_renderer_shutdown(void);
 
-render_target_t* vulkan_create_render_target(renderer_context_t* context, platform_window_t* platform_window);
-void vulkan_destroy_render_target(renderer_context_t* context, render_target_t* target);
-int8_t vulkan_recreate_render_target(renderer_context_t* context, render_target_t* target);
+graphics_pipeline_t* vulkan_renderer_create_graphics_pipeline(const graphics_pipeline_create_info_t create_info);
+void vulkan_renderer_destroy_graphics_pipeline(graphics_pipeline_t* pipeline);
 
-void vulkan_draw_triangle(renderer_context_t* context, render_target_t* target);
+int8_t vulkan_renderer_swapchain_init(swapchain_t* swapchain, platform_window_t* window);
+void vulkan_renderer_swapchain_cleanup(swapchain_t* swapchain);
+void vulkan_renderer_swapchain_next_framebuffer(swapchain_t swapchain, framebuffer_t* buffer);
 
-#define VULKAN_RENDERER_FUNCTIONS (renderer_functions_t) { \
-	.create_render_target = vulkan_create_render_target, \
-	.destroy_render_target = vulkan_destroy_render_target, \
-	.recreate_render_target = vulkan_recreate_render_target, \
-	.draw_triangle = vulkan_draw_triangle \
-}
+int8_t vulkan_renderer_begin_draw(framebuffer_t target_buffer);
+int8_t vulkan_renderer_end_draw(framebuffer_t target_buffer);
+
+void draw_triangle(framebuffer_t target_buffer, graphics_pipeline_t* pipeline);
 
 #endif // VULKAN_RENDERER_H

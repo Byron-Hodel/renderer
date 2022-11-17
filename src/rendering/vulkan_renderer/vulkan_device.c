@@ -1,112 +1,101 @@
-#include "vulkan_internal.h"
-#include <malloc.h>
+#include "vulkan_device.h"
 #include <string.h>
+#include <malloc.h>
 
-static int8_t physical_device_supported(VkPhysicalDevice device);
+static int8_t physical_device_supported(const vulkan_context_t context, VkPhysicalDevice device);
 
-int8_t _vulkan_init_physical_devices(vulkan_context_t* context) {
-	VkPhysicalDevice* physical_devices;
-	VkResult r = vkEnumeratePhysicalDevices(context->instance, &context->physical_device_count, NULL);
+int8_t vulkan_init_physical_devices(const vulkan_context_t context, vulkan_physical_devices_t* physical_devices) {
+	VkResult r = vkEnumeratePhysicalDevices(context.instance, &physical_devices->count, NULL);
 	if(r != VK_SUCCESS) return 0;
-	physical_devices = malloc(sizeof(VkPhysicalDevice) * context->physical_device_count);
-	context->physical_devices = malloc(sizeof(vulkan_physical_device) * context->physical_device_count);
-	r = vkEnumeratePhysicalDevices(context->instance, &context->physical_device_count, physical_devices);
+	physical_devices->handles = malloc(sizeof(VkPhysicalDevice) * physical_devices->count);
+	physical_devices->supported = malloc(sizeof(uint8_t) * physical_devices->count);
+	r = vkEnumeratePhysicalDevices(context.instance, &physical_devices->count, physical_devices->handles);
 	if(r != VK_SUCCESS) {
-		free(physical_devices);
-		free(context->physical_devices);
+		free(physical_devices->handles);
+		free(physical_devices->supported);
+		return 0;
+	};
+	for(uint32_t i = 0; i < physical_devices->count; i++) {
+		physical_devices->supported[i] = physical_device_supported(context, physical_devices->handles[i]);
 	}
-
-	for(int i = 0; i < context->physical_device_count; i++) {
-		context->physical_devices[i].handle = physical_devices[i];
-		context->physical_devices[i].supported = physical_device_supported(physical_devices[i]);
-	}
-
-	free(physical_devices);
 	return 1;
 }
 
-void _vulkan_cleanup_physical_device(vulkan_context_t* context) {
-	free(context->physical_devices);
-	context->physical_devices = NULL;
+void vulkan_cleanup_physical_devices(vulkan_physical_devices_t* physical_devices) {
+	free(physical_devices->handles);
+	free(physical_devices->supported);
+	physical_devices->handles = NULL;
+	physical_devices->supported = NULL;
+	physical_devices->count = 0;
 }
 
-int8_t _vulkan_select_physical_device(vulkan_context_t* context) {
-	int8_t selected_device = 0;
-	for(int i = 0; i < context->physical_device_count; i++) {
-		if(context->physical_devices[i].supported == 0) continue;
+int32_t vulkan_select_physical_device(const vulkan_physical_devices_t physical_devices) {
+	int32_t device_index = -1;
+	for(uint32_t i = 0; i < physical_devices.count; i++) {
+		if(physical_devices.supported[i] == 0) continue;
 		VkPhysicalDeviceProperties properties;
-		vkGetPhysicalDeviceProperties(context->physical_devices[i].handle, &properties);
+		vkGetPhysicalDeviceProperties(physical_devices.handles[i], &properties);
 		if(properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-			context->selected_device.physical_device = context->physical_devices[i];
-			return 1;
+			return i;
 		}
 		else if(properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-			selected_device = 1;
-			context->selected_device.physical_device = context->physical_devices[i];
+			device_index = i;
 		}
 	}
-	return selected_device;
+	return device_index;
 }
 
-int8_t _vulkan_init_selected_device(vulkan_context_t* context) {
+int8_t vulkan_init_device(const vulkan_context_t context, vulkan_device_t* device, const uint32_t device_index) {
+	if(context.physical_devices.supported[device_index] == 0) return 0;
+	VkPhysicalDevice physical_device = context.physical_devices.handles[device_index];
+
 	VkPhysicalDeviceFeatures device_features;
-	vkGetPhysicalDeviceFeatures(context->selected_device.physical_device.handle, &device_features);
+	vkGetPhysicalDeviceFeatures(physical_device, &device_features);
 
 	uint32_t queue_family_count;
 	VkQueueFamilyProperties* queue_families;
-	vkGetPhysicalDeviceQueueFamilyProperties(context->selected_device.physical_device.handle,
-	                                         &queue_family_count, NULL);
+	vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, NULL);
 	queue_families = calloc(sizeof(VkQueueFamilyProperties), queue_family_count);
-	vkGetPhysicalDeviceQueueFamilyProperties(context->selected_device.physical_device.handle,
-	                                         &queue_family_count, queue_families);
+	vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families);
 
-	memset(context->selected_device.queue_indices, -1, sizeof(int32_t) * 4);
+	memset(device->queue_family_indices, -1, sizeof(int32_t) * 4);
 	for(int i = 0; i < queue_family_count; i++) {
 		uint32_t queue_flags = queue_families[i].queueFlags;
 
-		if((queue_flags & VK_QUEUE_GRAPHICS_BIT) == VK_QUEUE_GRAPHICS_BIT &&
-		    context->selected_device.queue_indices[GRAPHICS_QUEUE_INDEX] == -1)
-		{
-			context->selected_device.queue_indices[GRAPHICS_QUEUE_INDEX] = i;
+		if(queue_flags & VK_QUEUE_GRAPHICS_BIT && device->queue_family_indices[GRAPHICS_QUEUE_INDEX] == -1) {
+			device->queue_family_indices[GRAPHICS_QUEUE_INDEX] = i;
 		}
-		if((queue_flags & VK_QUEUE_COMPUTE_BIT) == VK_QUEUE_COMPUTE_BIT &&
-		    context->selected_device.queue_indices[COMPUTE_QUEUE_INDEX] == -1)
-		{
-			context->selected_device.queue_indices[COMPUTE_QUEUE_INDEX] = i;
+		if(queue_flags & VK_QUEUE_COMPUTE_BIT && device->queue_family_indices[COMPUTE_QUEUE_INDEX] == -1) {
+			device->queue_family_indices[COMPUTE_QUEUE_INDEX] = i;
 		}
-		if((queue_flags & VK_QUEUE_TRANSFER_BIT) == VK_QUEUE_TRANSFER_BIT &&
-		    context->selected_device.queue_indices[TRANSFER_QUEUE_INDEX] == -1)
-		{
-			context->selected_device.queue_indices[TRANSFER_QUEUE_INDEX] = i;
+		if(queue_flags & VK_QUEUE_TRANSFER_BIT && device->queue_family_indices[TRANSFER_QUEUE_INDEX] == -1) {
+			device->queue_family_indices[TRANSFER_QUEUE_INDEX] = i;
 		}
-		if(queue_flags < queue_families[context->selected_device.queue_indices[TRANSFER_QUEUE_INDEX]].queueFlags) {
-			context->selected_device.queue_indices[TRANSFER_QUEUE_INDEX] = i;
+		if(queue_flags < queue_families[device->queue_family_indices[TRANSFER_QUEUE_INDEX]].queueFlags) {
+			device->queue_family_indices[TRANSFER_QUEUE_INDEX] = i;
 		}
-		if((queue_flags & VK_QUEUE_SPARSE_BINDING_BIT) == VK_QUEUE_SPARSE_BINDING_BIT &&
-		    context->selected_device.queue_indices[SPARSE_BIND_QUEUE_INDEX] == -1)
-		{
-			context->selected_device.queue_indices[SPARSE_BIND_QUEUE_INDEX] = i;
+		if(queue_flags & VK_QUEUE_SPARSE_BINDING_BIT && device->queue_family_indices[SPARSE_BIND_QUEUE_INDEX] == -1) {
+			device->queue_family_indices[SPARSE_BIND_QUEUE_INDEX] = i;
 		}
 	}
-	if(context->selected_device.queue_indices[GRAPHICS_QUEUE_INDEX] == -1) return 0;
-	if(context->selected_device.queue_indices[COMPUTE_QUEUE_INDEX] == -1) return 0;
-	if(context->selected_device.queue_indices[TRANSFER_QUEUE_INDEX] == -1) return 0;
+	if(device->queue_family_indices[GRAPHICS_QUEUE_INDEX] == -1) return 0;
+	if(device->queue_family_indices[COMPUTE_QUEUE_INDEX] == -1) return 0;
+	if(device->queue_family_indices[TRANSFER_QUEUE_INDEX] == -1) return 0;
 
 	uint32_t queue_info_indices[4];
 	uint32_t queue_info_count = 1;
-	queue_info_indices[0] = context->selected_device.queue_indices[0];
+	queue_info_indices[0] = device->queue_family_indices[0];
 	for(int i = 1; i < 4; i++) {
 		int8_t unique_index = 1;
 		for(int j = 0; j < i; j++) {
-			if(context->selected_device.queue_indices[i] == context->selected_device.queue_indices[j]) {
+			if(device->queue_family_indices[i] == device->queue_family_indices[j]) {
 				unique_index = 0;
 				break;
 			}
 		}
 		if(unique_index) {
-			queue_info_indices[queue_info_count++] = context->selected_device.queue_indices[i];
+			queue_info_indices[queue_info_count++] = device->queue_family_indices[i];
 		}
-		
 	}
 	VkDeviceQueueCreateInfo queue_infos[4] = {0};
 	for(int i = 0; i < queue_info_count; i++) {
@@ -120,43 +109,49 @@ int8_t _vulkan_init_selected_device(vulkan_context_t* context) {
 	VkDeviceCreateInfo device_create_info = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
 	device_create_info.queueCreateInfoCount = queue_info_count;
 	device_create_info.pQueueCreateInfos = queue_infos;
-	device_create_info.enabledLayerCount = layer_count;
-	device_create_info.ppEnabledLayerNames = layer_names;
-	device_create_info.enabledExtensionCount = device_extension_count;
-	device_create_info.ppEnabledExtensionNames = device_extension_names;
+	device_create_info.enabledLayerCount = context.layer_count;
+	device_create_info.ppEnabledLayerNames = (const char* const*)context.layer_names;
+	device_create_info.enabledExtensionCount = context.device_extension_count;
+	device_create_info.ppEnabledExtensionNames = (const char* const*)context.device_extension_names;
 	device_create_info.pEnabledFeatures = &device_features;
 
-	VkResult device_result = vkCreateDevice(context->selected_device.physical_device.handle,
-	                                     &device_create_info, NULL,
-	                                     &context->selected_device.logical_device);
+	VkResult device_result = vkCreateDevice(physical_device, &device_create_info, NULL, &device->handle);
 	if(device_result != VK_SUCCESS) {
 		return 0;
 	}
 
 	for(int i = 0; i < 4; i++) {
-		if(context->selected_device.queue_indices[i] != -1) {
-			vkGetDeviceQueue(context->selected_device.logical_device,
-			                 context->selected_device.queue_indices[i],
-			                 0, &context->selected_device.queues[i]);
-		}
-		else {
-			context->selected_device.queues[i] = VK_NULL_HANDLE;
-		}
+		device->queues[i] = VK_NULL_HANDLE;
+		if(device->queue_family_indices[i] != -1)
+			vkGetDeviceQueue(device->handle, device->queue_family_indices[i], 0, &device->queues[i]);
 	}
+
+	VkCommandPoolCreateInfo graphics_cmd_pool_info = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+	graphics_cmd_pool_info.queueFamilyIndex = device->queue_family_indices[GRAPHICS_QUEUE_INDEX];
+	graphics_cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	VkResult cmd_buffer_result = vkCreateCommandPool(device->handle, &graphics_cmd_pool_info, NULL, &device->graphics_cmd_pool);
+	if(cmd_buffer_result != VK_SUCCESS) {
+		vkDestroyDevice(device->handle, NULL);
+		return 0;
+	}
+
+	device->device_index = device_index;
 	return 1;
 }
 
-void _vulkan_cleanup_selected_device(vulkan_context_t* context) {
-	vkDestroyDevice(context->selected_device.logical_device, NULL);
-	context->selected_device.physical_device.handle = VK_NULL_HANDLE;
-	context->selected_device.physical_device.supported = 0;
-	memset(context->selected_device.queue_indices, -1, sizeof(int32_t) * 4);
-	memset(context->selected_device.queues, 0, sizeof(VkQueue) * 4);
+void vulkan_cleanup_device(vulkan_device_t* device) {
+	vkDeviceWaitIdle(device->handle);
+	vkDestroyCommandPool(device->handle, device->graphics_cmd_pool, NULL);
+	vkDestroyDevice(device->handle, NULL);
+	device->handle = NULL;
+	memset(device->queue_family_indices, -1, sizeof(int32_t) * 4);
+	memset(device->queues, 0, sizeof(VkQueue) * 4);
 }
 
 
-static int8_t physical_device_supported(VkPhysicalDevice device) {
-	if(device_extension_count == 0) return 1; // if no extensions are required return true
+static int8_t physical_device_supported(const vulkan_context_t context, VkPhysicalDevice device) {
+	if(context.device_extension_count == 0) return 1; // if no extensions are required return true
 	uint32_t extension_property_count = 0;
 	VkExtensionProperties device_extension_properties[512];
 	VkResult r = vkEnumerateDeviceExtensionProperties(device, NULL, &extension_property_count, NULL);
@@ -168,10 +163,10 @@ static int8_t physical_device_supported(VkPhysicalDevice device) {
 		return 0;
 	}
 
-	for(int i = 0; i < device_extension_count; i++) {
+	for(int i = 0; i < context.device_extension_count; i++) {
 		int8_t found_extension = 0;
 		for(int j = 0; j < extension_property_count; j++) {
-			if(strcmp(device_extension_names[i], device_extension_properties[j].extensionName) == 0) {
+			if(strcmp(context.device_extension_names[i], device_extension_properties[j].extensionName) == 0) {
 				found_extension = 1;
 				break;
 			}

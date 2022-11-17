@@ -2,29 +2,44 @@
 #define RENDERER_H
 
 #include <platform/platform.h>
-
 #include <stdint.h>
 
-typedef struct {
-	char* app_name;
-	uint32_t api_backend;
-	platform_context_t* platform_context;
-} renderer_context_create_info_t;
-
-typedef struct renderer_context_t renderer_context_t;
-typedef struct render_target_t render_target_t;
-
 #define RENDERER_API_BACKEND_VULKAN  1
-#define RENDERER_API_BACKEND_DIRECTX 2
+//#define RENDERER_API_BACKEND_DIRECTX 2
 
-renderer_context_t* renderer_create_context(const renderer_context_create_info_t create_info);
-void renderer_destroy_context(renderer_context_t* context);
+typedef struct swapchain_t {
+	void* handle;
+} swapchain_t;
 
-render_target_t* renderer_create_render_target(renderer_context_t* context, platform_window_t* platform_window);
-void renderer_destroy_render_target(renderer_context_t* context, render_target_t* target);
-int8_t renderer_recreate_render_target(renderer_context_t* context, render_target_t* target);
+typedef struct framebuffer_t {
+	void* handle;
+} framebuffer_t;
 
-// TODO: REMOVE LATER
-void draw_triangle(renderer_context_t* context, render_target_t* target);
+typedef struct render_target_t {
+	uint32_t type;
+	void* handle;
+} render_target_t;
+typedef struct graphics_pipeline_t graphics_pipeline_t;
+
+typedef struct {
+	char*    vert_shader_src;
+	uint64_t vert_shader_src_len;
+	char*    frag_shader_src;
+	uint64_t frag_shader_src_len;
+} graphics_pipeline_create_info_t;
+
+int8_t renderer_init(const char* app_name, uint32_t api_backend);
+void renderer_shutdown(void);
+
+graphics_pipeline_t* renderer_create_graphics_pipeline(const graphics_pipeline_create_info_t create_info);
+void renderer_destroy_graphics_pipeline(graphics_pipeline_t* pipeline);
+
+int8_t renderer_swapchain_init(swapchain_t* swapchain, platform_window_t* window);
+void renderer_swapchain_cleanup(swapchain_t* swapchain);
+void renderer_swapchain_next_framebuffer(swapchain_t swapchain, framebuffer_t* buffer);
+
+int8_t renderer_begin_draw(framebuffer_t target_buffer);
+int8_t renderer_end_draw(framebuffer_t target_buffer);
+
 
 #endif // RENDERER_H
