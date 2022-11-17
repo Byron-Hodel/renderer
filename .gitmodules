@@ -1,3 +1,6 @@
 [submodule "external/platform"]
 	path = external/platform
 	url = https://github.com/Byron-Hodel/platform.git
+[submodule "external/math"]
+	path = external/math
+	url = https://github.com/Byron-Hodel/mathlib.git
