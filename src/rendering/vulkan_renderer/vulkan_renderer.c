@@ -84,12 +84,16 @@ int8_t vulkan_renderer_init(const char* app_name) {
 }
 
 
+
+
 void vulkan_renderer_shutdown(void) {
 	vulkan_destroy_renderpass(&context, &context.default_renderpass);
 	vulkan_cleanup_physical_devices(&context.physical_devices);
 	vulkan_cleanup_device(&context.selected_device);
 	vkDestroyInstance(context.instance, NULL);
 }
+
+
 
 
 graphics_pipeline_t* vulkan_renderer_create_graphics_pipeline(const graphics_pipeline_create_info_t create_info) {
@@ -99,109 +103,196 @@ graphics_pipeline_t* vulkan_renderer_create_graphics_pipeline(const graphics_pip
 }
 
 
+
+
 void vulkan_renderer_destroy_graphics_pipeline(graphics_pipeline_t* pipeline) {
 	vulkan_destroy_graphics_pipeline(&context, (vulkan_graphics_pipeline_t*)pipeline);
 }
 
 
-int8_t vulkan_renderer_swapchain_init(swapchain_t* swapchain, platform_window_t* window) {
-	vulkan_swapchain_t* sc = malloc(sizeof(vulkan_swapchain_t));
-	if(!vulkan_swapchain_create(&context, window, sc)) {
-		return 0;
-	}
-	swapchain->handle = (void*)sc;
-	return 1;
-}
 
 
-void vulkan_renderer_swapchain_cleanup(swapchain_t* swapchain) {
-	vulkan_swapchain_t* sc = (vulkan_swapchain_t*)swapchain->handle;
-	vulkan_swapchain_destroy(&context, sc);
-	swapchain->handle = NULL;
-}
-
-
-void vulkan_renderer_swapchain_next_framebuffer(swapchain_t swapchain, framebuffer_t* buffer) {
-	vulkan_swapchain_t* sc = (vulkan_swapchain_t*)swapchain.handle;
-	VkSemaphore semaphore;
-	uint32_t image_index;
-	VkSemaphoreCreateInfo semaphore_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-	VkResult result = vkCreateSemaphore(context.selected_device.handle, &semaphore_info, NULL, &semaphore);
-	vkAcquireNextImageKHR(context.selected_device.handle, sc->handle,
-	                      UINT64_MAX, semaphore, VK_NULL_HANDLE, &image_index);
-	//buffer->handle = 
-	buffer->extra = swapchain.handle;
-}
-
-// TODO: only here to make things work, remove later
-static vulkan_command_buffer_t tmp_cmd_buffer = {0};
-
-int8_t vulkan_renderer_begin_draw(framebuffer_t target_buffer) {
-	if(tmp_cmd_buffer.handle == VK_NULL_HANDLE) {
-		if(!vulkan_command_buffer_alloc(context, &tmp_cmd_buffer,
-		                                context.selected_device.graphics_cmd_pool, 1))
-		{
+int8_t vulkan_renderer_init_render_target(render_target_t* render_target, void* target, uint32_t target_type) {
+	if(target_type == RENDER_TARGET_WINDOW) {
+		render_target->type = RENDER_TARGET_WINDOW;
+		render_target->target_handle = target;
+		platform_window_t* window = (platform_window_t*)target;
+		vulkan_window_render_target_t* handle = malloc(sizeof(vulkan_window_render_target_t));
+		if(!vulkan_command_buffer_alloc(context, &handle->command_buffer, context.selected_device.graphics_cmd_pool, 1)) {
 			return 0;
 		}
+		handle->in_flight_fence.signaled = 1; // start the fence in the signaled state
+		if(!vulkan_fence_create(context, &handle->in_flight_fence)) {
+			vulkan_command_buffer_free(context, &handle->command_buffer, context.selected_device.graphics_cmd_pool);
+			free(handle);
+			return 0;
+		}
+		if(!vulkan_swapchain_create(&context, window, &handle->swapchain)) {
+			vulkan_command_buffer_free(context, &handle->command_buffer, context.selected_device.graphics_cmd_pool);
+			vulkan_fence_destroy(context, &handle->in_flight_fence);
+			free(handle);
+			return 0;
+		}
+		VkSemaphoreCreateInfo semaphore_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+		vkCreateSemaphore(context.selected_device.handle, &semaphore_info, NULL, &handle->image_available_semaphore);
+		vkCreateSemaphore(context.selected_device.handle, &semaphore_info, NULL, &handle->render_complete_semaphore);
+		render_target->handle = handle;
+		return 1;
 	}
-	vulkan_command_buffer_t* cmd_buffer = &tmp_cmd_buffer;
-	vulkan_framebuffer_t* framebuffer = (vulkan_framebuffer_t*)target_buffer.handle;
-	vulkan_command_buffer_reset(cmd_buffer);
-	vulkan_command_buffer_begin_recording(cmd_buffer, 0, 0, 0);
-	vulkan_renderpass_begin(&context.default_renderpass, cmd_buffer, framebuffer);
+	return 0;
+}
+
+
+
+
+void vulkan_renderer_cleanup_render_target(render_target_t* target) {
+	vkDeviceWaitIdle(context.selected_device.handle);
+	if(target->type == RENDER_TARGET_WINDOW) {
+		target->type = 0;
+		target->target_handle = NULL;
+		vulkan_window_render_target_t* handle = (vulkan_window_render_target_t*)target->handle;
+		target->handle = NULL;
+		vulkan_command_buffer_free(context, &handle->command_buffer, context.selected_device.graphics_cmd_pool);
+		vulkan_fence_destroy(context, &handle->in_flight_fence);
+		vulkan_swapchain_destroy(&context, &handle->swapchain);
+		vkDestroySemaphore(context.selected_device.handle, handle->image_available_semaphore, NULL);
+		vkDestroySemaphore(context.selected_device.handle, handle->render_complete_semaphore, NULL);
+		free(handle);
+	}
+}
+
+
+
+
+int8_t vulkan_renderer_update_render_target(render_target_t* target) {
+	if(target->type == RENDER_TARGET_WINDOW) {
+		vulkan_window_render_target_t* handle = (vulkan_window_render_target_t*)target->handle;
+		return vulkan_swapchain_recreate(&context, &handle->swapchain);
+	}
+	return 0;
+}
+
+
+
+
+int8_t vulkan_renderer_begin_frame(render_target_t render_target) {
+	vulkan_framebuffer_t* framebuffer;
+	vulkan_command_buffer_t* command_buffer;
+	vulkan_fence_t* in_flight_fence;
+	if(render_target.type == RENDER_TARGET_WINDOW) {
+		vulkan_window_render_target_t* handle = (vulkan_window_render_target_t*)render_target.handle;
+		command_buffer = &handle->command_buffer;
+		vulkan_fence_wait(context, &handle->in_flight_fence, UINT64_MAX);
+		vulkan_fence_reset(context, &handle->in_flight_fence);
+		VkResult result = vkAcquireNextImageKHR(context.selected_device.handle, handle->swapchain.handle, UINT64_MAX,
+	                                            handle->image_available_semaphore, VK_NULL_HANDLE, &handle->image_index);
+		if(result != VK_SUCCESS) return 0;
+		in_flight_fence = &handle->in_flight_fence;
+	}
+	vulkan_command_buffer_reset(command_buffer);
+	vulkan_command_buffer_begin_recording(command_buffer, 0, 0, 0);
 	return 1;
 }
 
 
-void draw_triangle(framebuffer_t target_buffer, graphics_pipeline_t* pipeline) {
+
+int8_t vulkan_renderer_submit_packet(render_target_t render_target, const render_packet_t packet) {
+	return 1;
+}
+
+
+
+int8_t vulkan_renderer_end_frame(render_target_t render_target) {
+	vulkan_command_buffer_t* command_buffer;
+	VkSubmitInfo submit_info = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+	vulkan_fence_t in_flight_fence = {0};
+	if(render_target.type == RENDER_TARGET_WINDOW) {
+		vulkan_window_render_target_t* handle = (vulkan_window_render_target_t*)render_target.handle;
+		command_buffer = &handle->command_buffer;
+		submit_info.waitSemaphoreCount = 1;
+		submit_info.pWaitSemaphores = &handle->image_available_semaphore;
+		submit_info.signalSemaphoreCount = 1;
+		submit_info.pSignalSemaphores = &handle->render_complete_semaphore;
+		in_flight_fence = handle->in_flight_fence;
+	}
+	vulkan_command_buffer_end_recording(command_buffer);
+	vulkan_command_buffer_submit(command_buffer);
+	VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+	submit_info.pWaitDstStageMask = wait_stages;
+	submit_info.commandBufferCount = 1;
+	submit_info.pCommandBuffers = &command_buffer->handle;
+	vkQueueSubmit(context.selected_device.queues[GRAPHICS_QUEUE_INDEX], 1, &submit_info, in_flight_fence.handle);
+
+	if(render_target.type == RENDER_TARGET_WINDOW) {
+		vulkan_window_render_target_t* handle = (vulkan_window_render_target_t*)render_target.handle;
+		VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+		present_info.waitSemaphoreCount = 1;
+		present_info.pWaitSemaphores = &handle->render_complete_semaphore;
+		present_info.swapchainCount = 1;
+		present_info.pSwapchains = &handle->swapchain.handle;
+		present_info.pImageIndices = &handle->image_index;
+		vkQueuePresentKHR(context.selected_device.queues[GRAPHICS_QUEUE_INDEX], &present_info);
+	}
+	return 1;
+}
+
+
+void draw_triangle(render_target_t render_target, graphics_pipeline_t* pipeline) {
+	vulkan_window_render_target_t* handle = (vulkan_window_render_target_t*)render_target.handle;
+
 	vulkan_graphics_pipeline_t* vulkan_pipeline = (vulkan_graphics_pipeline_t*)pipeline;
-	vulkan_command_buffer_t* cmd_buffer = &tmp_cmd_buffer;
-	vulkan_framebuffer_t* framebuffer = (vulkan_framebuffer_t*)target_buffer.handle;
+	vulkan_command_buffer_t* command_buffer = &handle->command_buffer;
+
 	VkViewport viewport;
-	viewport.width = framebuffer->width;
-	viewport.height = framebuffer->height;
-	VkRect2D scissor;
+	viewport.x = 0;
+	viewport.y = 0;
+	viewport.width = (float)handle->swapchain.extent.width;
+	viewport.height = (float)handle->swapchain.extent.height;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
+	VkRect2D scissor;
 	scissor.offset.x = 0;
 	scissor.offset.y = 0;
+	scissor.extent = handle->swapchain.extent;
 
-	vkCmdBindPipeline(cmd_buffer->handle, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_pipeline->handle);
-	vkCmdSetViewport(cmd_buffer->handle, 0, 1, &viewport);
-	vkCmdSetScissor(cmd_buffer->handle, 0, 1, &scissor);
-	vkCmdDraw(cmd_buffer->handle, 3, 1, 0, 0);
-}
+	VkClearValue clear_colors[2];
+	clear_colors[0] = (VkClearValue) {{{ 64.34f/70, 38.587f/70, 98.661f/70, 1.0f}}};
+	clear_colors[1] = (VkClearValue) {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+	VkRenderPassBeginInfo begin_info = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+	begin_info.renderPass = context.default_renderpass.handle;
+	begin_info.framebuffer = handle->swapchain.default_renderpass_frame_buffers[handle->image_index].handle;
+	begin_info.renderArea.offset.x = (int32_t)context.default_renderpass.pos.x;
+	begin_info.renderArea.offset.y = (int32_t)context.default_renderpass.pos.y;
+	begin_info.renderArea.extent = handle->swapchain.extent;
+	begin_info.clearValueCount = 2;
+	begin_info.pClearValues = clear_colors;
 
+	//vulkan_command_buffer_reset(command_buffer);
+	//vulkan_command_buffer_begin_recording(command_buffer, 0, 0, 0);
+	vkCmdBeginRenderPass(command_buffer->handle, &begin_info, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdBindPipeline(command_buffer->handle, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_pipeline->handle);
+	vkCmdSetViewport(command_buffer->handle, 0, 1, &viewport);
+	vkCmdSetScissor(command_buffer->handle, 0, 1, &scissor);
+	vkCmdDraw(command_buffer->handle, 3, 1, 0, 0);
+	vkCmdEndRenderPass(command_buffer->handle);
+	//vulkan_command_buffer_end_recording(command_buffer);
 
-int8_t vulkan_renderer_end_draw(framebuffer_t target_buffer) {
-	vulkan_command_buffer_t* cmd_buffer = &tmp_cmd_buffer;
-	vulkan_framebuffer_t* framebuffer = (vulkan_framebuffer_t*)target_buffer.handle;
-	VkSemaphore image_avaliable_semaphore;
-	VkSemaphore render_complete_semaphore;
-	vulkan_fence_t* fence;
-	vulkan_fence_reset(context, fence);
+	//VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+	//VkSubmitInfo submit_info = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+	//submit_info.waitSemaphoreCount = 1;
+	//submit_info.pWaitSemaphores = &handle->image_available_semaphore;
+	//submit_info.pWaitDstStageMask = wait_stages;
+	//submit_info.commandBufferCount = 1;
+	//submit_info.pCommandBuffers = &command_buffer->handle;
+	//submit_info.signalSemaphoreCount = 1;
+	//submit_info.pSignalSemaphores = &handle->render_complete_semaphore;
+	//vkQueueSubmit(context.selected_device.queues[GRAPHICS_QUEUE_INDEX], 1, &submit_info, handle->in_flight_fence.handle);
 
-	VkSemaphoreCreateInfo semaphore_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-	vkCreateSemaphore(context.selected_device.handle, &semaphore_info, NULL, &render_complete_semaphore);
-	
-	vulkan_renderpass_end(&context.default_renderpass, cmd_buffer);
-	vulkan_command_buffer_end_recording(cmd_buffer);
-	vulkan_command_buffer_submit(cmd_buffer);
-
-	VkPipelineStageFlags wait_stages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-	VkSubmitInfo submit_info = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-	submit_info.commandBufferCount = 1;
-	submit_info.pCommandBuffers = &cmd_buffer->handle;
-	submit_info.waitSemaphoreCount = 1;
-	submit_info.pWaitSemaphores = &image_avaliable_semaphore;
-	submit_info.pWaitDstStageMask = wait_stages;
-	submit_info.signalSemaphoreCount = 1;
-	submit_info.pSignalSemaphores = &render_complete_semaphore;
-	VkResult r = vkQueueSubmit(context.selected_device.queues[GRAPHICS_QUEUE_INDEX], 1, &submit_info, fence->handle);
-	if(r != VK_SUCCESS) return 0;
-
-	vulkan_fence_wait(context, fence, UINT64_MAX);
-	vkDestroySemaphore(context.selected_device.handle, render_complete_semaphore, NULL);
-
-	return 1;
+	//VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+	//present_info.waitSemaphoreCount = 1;
+	//present_info.pWaitSemaphores = &handle->render_complete_semaphore;
+	//present_info.swapchainCount = 1;
+	//present_info.pSwapchains = &handle->swapchain.handle;
+	//present_info.pImageIndices = &image_index;
+	//vkQueuePresentKHR(context.selected_device.queues[GRAPHICS_QUEUE_INDEX], &present_info);
 }

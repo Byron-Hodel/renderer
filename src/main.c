@@ -4,11 +4,24 @@
 
 #include "rendering/renderer.h"
 #include "resource_system.h"
+#include "math.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #include <glslang/Include/glslang_c_interface.h>
+
+typedef struct vertex_t {
+	vec2_t pos;
+	vec3_t color;
+} vertex_t;
+
+uint32_t vertex_count = 3;
+vertex_t test_verticies[] = {
+	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
 
 static uint64_t file_size(const char* file_path) {
 	FILE* file = fopen(file_path, "r");
@@ -87,15 +100,13 @@ int main(void) {
 
 	platform_window_create_info_t window_create_info = {0};
 	window_create_info.name = (char*)"Cat Window";
-	window_create_info.x = 100;
-	window_create_info.y = 100;
-	window_create_info.width = 1920>>1;
-	window_create_info.height = 1080>>1;
+	window_create_info.x = 0;
+	window_create_info.y = 0;
+	window_create_info.width = 1920;
+	window_create_info.height = 1080;
 	window_create_info.parent = NULL;
-	window_create_info.flags = PLATFORM_WF_SPLASH;
+	window_create_info.flags = PLATFORM_WF_NORMAL;
 	platform_window_t* window = platform_create_window(window_create_info, NULL);
-
-
 
 	graphics_pipeline_create_info_t pipeline_info;
 	pipeline_info.vert_shader_src = (char*)vert_spirv;
@@ -110,28 +121,38 @@ int main(void) {
 		return -1;
 	}
 
-	swapchain_t window_swapchain;
-	if(!renderer_swapchain_init(&window_swapchain, window)) {
-		platform_destroy_window(window, NULL);
-		platform_shutdown();
-		renderer_shutdown();
-		return -1;
-	}
+	uint32_t last_width, last_height;
+	platform_get_window_size(window, &last_width, &last_height);
 
+	render_target_t render_target;
+	renderer_init_render_target(&render_target, window, RENDER_TARGET_WINDOW);
+
+
+
+	uint32_t frame = 0;
 	while(!platform_window_should_close(window)) {
 		platform_handle_events();
-		framebuffer_t framebuffer;
-		renderer_swapchain_next_framebuffer(window_swapchain, &framebuffer);
-		//if(renderer_begin_draw(framebuffer)) {
-		//	draw_triangle(framebuffer, pipeline);
-		//	renderer_end_draw(framebuffer);
-		//}
-		platform_sleep_miliseconds(32);
+		uint32_t width, height;
+		platform_get_window_size(window, &width, &height);
+		if(width != last_width || height != last_height) {
+			renderer_update_render_target(&render_target);
+			last_width = width;
+			last_height = height;
+		}
+		renderer_begin_frame(render_target);
+		//render_packet_t packet = {0};
+		//renderer_submit_packet(&frame_state, packet);
+		draw_triangle(render_target, pipeline);
+		renderer_end_frame(render_target);
+		//platform_sleep_miliseconds(32);
+		printf("frame: %d\r", frame++);
+		fflush(stdout);
 	}
 
 
+	renderer_cleanup_render_target(&render_target);
+
 	renderer_destroy_graphics_pipeline(pipeline);
-	renderer_swapchain_cleanup(&window_swapchain);
 
 	platform_destroy_window(window, NULL);
 

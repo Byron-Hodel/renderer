@@ -2,14 +2,15 @@
 #include "vulkan_renderer/vulkan_renderer.h"
 
 struct backend_functions {
-	void (*shutdown)(void);
+	void                 (*shutdown)(void);
 	graphics_pipeline_t* (*create_graphics_pipeline)(const graphics_pipeline_create_info_t create_info);
-	void (*destroy_graphics_pipeline)(graphics_pipeline_t* pipeline);
-	int8_t (*swapchain_init)(swapchain_t* swapchain, platform_window_t* window);
-	void (*swapchain_cleanup)(swapchain_t* swapchain);
-	void (*swapchain_next_framebuffer)(swapchain_t swapchain, framebuffer_t* buffer);
-	int8_t (*begin_draw)(framebuffer_t target_buffer);
-	int8_t (*end_draw)(framebuffer_t target_buffer);
+	void                 (*destroy_graphics_pipeline)(graphics_pipeline_t* pipeline);
+	int8_t               (*init_render_target)(render_target_t* render_target, void* target, uint32_t target_type);
+	void                 (*cleanup_render_target)(render_target_t* target);
+	int8_t               (*update_render_target)(render_target_t* target);
+	int8_t               (*begin_frame)(render_target_t render_target);
+	int8_t               (*submit_packet)(render_target_t render_target, const render_packet_t packet);
+	int8_t               (*end_frame)(render_target_t render_target);
 } functions;
 
 int8_t renderer_init(const char* app_name, uint32_t api_backend) {
@@ -20,11 +21,12 @@ int8_t renderer_init(const char* app_name, uint32_t api_backend) {
 		functions.shutdown = vulkan_renderer_shutdown;
 		functions.create_graphics_pipeline = vulkan_renderer_create_graphics_pipeline;
 		functions.destroy_graphics_pipeline = vulkan_renderer_destroy_graphics_pipeline;
-		functions.swapchain_init = vulkan_renderer_swapchain_init;
-		functions.swapchain_cleanup = vulkan_renderer_swapchain_cleanup;
-		functions.swapchain_next_framebuffer = vulkan_renderer_swapchain_next_framebuffer;
-		functions.begin_draw = vulkan_renderer_begin_draw;
-		functions.end_draw = vulkan_renderer_end_draw;
+		functions.init_render_target = vulkan_renderer_init_render_target;
+		functions.cleanup_render_target = vulkan_renderer_cleanup_render_target;
+		functions.update_render_target = vulkan_renderer_update_render_target;
+		functions.begin_frame = vulkan_renderer_begin_frame;
+		functions.submit_packet = vulkan_renderer_submit_packet;
+		functions.end_frame = vulkan_renderer_end_frame;
 		return 1;
 	default:
 		return 0;
@@ -37,25 +39,26 @@ void renderer_shutdown(void) {
 graphics_pipeline_t* renderer_create_graphics_pipeline(const graphics_pipeline_create_info_t create_info) {
 	return functions.create_graphics_pipeline(create_info);
 }
-
 void renderer_destroy_graphics_pipeline(graphics_pipeline_t* pipeline) {
 	functions.destroy_graphics_pipeline(pipeline);
 }
 
-int8_t renderer_swapchain_init(swapchain_t* swapchain, platform_window_t* window) {
-	return functions.swapchain_init(swapchain, window);
+int8_t renderer_init_render_target(render_target_t* render_target, void* target, uint32_t target_type) {
+	return functions.init_render_target(render_target, target, target_type);
 }
-void renderer_swapchain_cleanup(swapchain_t* swapchain) {
-	functions.swapchain_cleanup(swapchain);
+void renderer_cleanup_render_target(render_target_t* target) {
+	functions.cleanup_render_target(target);
 }
-void renderer_swapchain_next_framebuffer(swapchain_t swapchain, framebuffer_t* buffer) {
-	functions.swapchain_next_framebuffer(swapchain, buffer);
+int8_t renderer_update_render_target(render_target_t* target) {
+	return functions.update_render_target(target);
 }
 
-
-int8_t renderer_begin_draw(framebuffer_t target_buffer) {
-	return functions.begin_draw(target_buffer);
+int8_t renderer_begin_frame(render_target_t render_target) {
+	return functions.begin_frame(render_target);
 }
-int8_t renderer_end_draw(framebuffer_t target_buffer) {
-	return functions.end_draw(target_buffer);
+int8_t renderer_submit_packet(render_target_t render_target, const render_packet_t packet) {
+	return functions.submit_packet(render_target, packet);
+}
+int8_t renderer_end_frame(render_target_t render_target) {
+	return functions.end_frame(render_target);
 }
